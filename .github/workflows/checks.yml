@@ -1,0 +1,17 @@
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python behavior
+        run: python3 scripts/test_deploy.py
+      - name: Check Python CLI
+        run: python3 scripts/deploy.py --help
+      - name: Check remote shell syntax
+        run: bash -n scripts/remote_deploy.sh
