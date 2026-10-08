@@ -110,8 +110,15 @@ if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
   ufw allow 443/tcp >/dev/null
 fi
 systemctl enable --now sing-box >/dev/null
-systemctl restart sing-box
-if ! systemctl is-active --quiet sing-box || ! ss -ltnH '( sport = :443 )' | grep -q .; then
+SERVICE_READY=0
+for _ in {1..20}; do
+  if systemctl is-active --quiet sing-box && ss -ltnH '( sport = :443 )' | grep -q .; then
+    SERVICE_READY=1
+    break
+  fi
+  sleep 0.25
+done
+if [[ "$SERVICE_READY" -ne 1 ]]; then
   echo 'ERROR: sing-box did not start listening on TCP 443' >&2
   journalctl -u sing-box -n 20 --no-pager >&2 || true
   exit 2
