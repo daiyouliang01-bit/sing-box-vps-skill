@@ -14,8 +14,16 @@ if [[ ${ID:-} != ubuntu && ${ID:-} != debian && " ${ID_LIKE:-} " != *" debian "*
   echo 'ERROR: automatic deployment supports Debian/Ubuntu only' >&2
   exit 2
 fi
-if [[ -e /etc/sing-box/config.json ]]; then
-  echo 'ERROR: existing /etc/sing-box/config.json; refusing to replace it' >&2
+package_default_config() {
+  [[ -f /etc/sing-box/config.json ]] || return 1
+  dpkg -S /etc/sing-box/config.json 2>/dev/null | grep -q '^sing-box:' || return 1
+  ! systemctl is-active --quiet sing-box || return 1
+  local verify_output
+  verify_output=$(dpkg --verify sing-box 2>/dev/null) || return 1
+  [[ -z "$verify_output" ]]
+}
+if [[ -e /etc/sing-box/config.json ]] && ! package_default_config; then
+  echo 'ERROR: existing sing-box configuration is not an inactive package default; refusing to replace it' >&2
   exit 2
 fi
 if command -v ss >/dev/null && ss -ltnH '( sport = :443 )' | grep -q .; then
@@ -45,7 +53,16 @@ if [[ ! "$UUID" =~ ^[0-9a-fA-F-]{36}$ || ! "$PRIVATE_KEY" =~ ^[A-Za-z0-9_-]{43}$
   exit 2
 fi
 
-install -d -m 700 /etc/sing-box
+install -d -m 755 /etc/sing-box
+PACKAGE_BACKUP=
+if [[ -e /etc/sing-box/config.json ]]; then
+  if ! package_default_config; then
+    echo 'ERROR: package default changed during installation; refusing to replace it' >&2
+    exit 2
+  fi
+  PACKAGE_BACKUP="/etc/sing-box/config.json.package-default.$(date -u +%Y%m%dT%H%M%SZ)"
+  mv /etc/sing-box/config.json "$PACKAGE_BACKUP"
+fi
 export UUID PRIVATE_KEY SHORT_ID
 python3 - <<'PY'
 import json
@@ -75,8 +92,16 @@ with path.open("x") as file:
     json.dump(config, file, indent=2)
 path.chmod(0o600)
 PY
+chown root:sing-box /etc/sing-box /etc/sing-box/config.json
+chmod 750 /etc/sing-box
+chmod 640 /etc/sing-box/config.json
 if ! sing-box check -c /etc/sing-box/config.json; then
   rm -f /etc/sing-box/config.json
+  if [[ -n "$PACKAGE_BACKUP" ]]; then
+    mv "$PACKAGE_BACKUP" /etc/sing-box/config.json
+    chown root:root /etc/sing-box
+    chmod 755 /etc/sing-box
+  fi
   echo 'ERROR: sing-box rejected generated config' >&2
   exit 2
 fi
